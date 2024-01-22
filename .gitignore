@@ -1,0 +1,7 @@
+/.idea
+/.vs
+/bin
+/obj
+/Properties
+/*.nef*
+/*.manifest.json
