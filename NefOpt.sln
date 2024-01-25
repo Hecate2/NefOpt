@@ -7,6 +7,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "NefOpt", "NefOpt.csproj", "
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Neo", "..\neo\src\neo\Neo.csproj", "{502FE9D7-25D6-4679-AD1A-40DBEE759841}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Neo.VM", "..\neo-vm\src\Neo.VM\Neo.VM.csproj", "{AF6EF4F5-BD97-409C-83F1-B2E172F510FA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{502FE9D7-25D6-4679-AD1A-40DBEE759841}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{502FE9D7-25D6-4679-AD1A-40DBEE759841}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{502FE9D7-25D6-4679-AD1A-40DBEE759841}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AF6EF4F5-BD97-409C-83F1-B2E172F510FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AF6EF4F5-BD97-409C-83F1-B2E172F510FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AF6EF4F5-BD97-409C-83F1-B2E172F510FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AF6EF4F5-BD97-409C-83F1-B2E172F510FA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

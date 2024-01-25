@@ -5,6 +5,7 @@ namespace NefOpt
 {
     public static class OpCodeTypes
     {
+        // BE AWARE that PUSHA is also related to addresses
         public static HashSet<OpCode> tryThrowFinally = new HashSet<OpCode>
         {
             TRY,

@@ -125,14 +125,17 @@ namespace DevHawk.DumpNef
             return result;
         }
 
-        public static IEnumerable<(int address, Instruction instruction)> EnumerateInstructions(this Script script)
+        public static IEnumerable<(int address, Instruction instruction)> EnumerateInstructions(this Script script, bool print=false)
         {
             var address = 0;
             var opcode = OpCode.PUSH0;
+            Instruction instruction;
             while (address < script.Length)
             {
-                var instruction = script.GetInstruction(address);
+                instruction = script.GetInstruction(address);
                 opcode = instruction.OpCode;
+                if (print)
+                    Console.WriteLine(WriteInstruction(address, instruction, "0000", new MethodToken[] { }));
                 yield return (address, instruction);
                 address += instruction.Size;
             }

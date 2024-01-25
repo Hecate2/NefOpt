@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\neo-vm\src\Neo.VM\Neo.VM.csproj" />
     <ProjectReference Include="..\neo\src\neo\Neo.csproj" />
   </ItemGroup>
 
