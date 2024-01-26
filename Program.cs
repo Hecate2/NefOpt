@@ -193,103 +193,117 @@ public static class Program
         return coveredMap;
     }
 
-    public enum StackType
+    public enum TryStack
     {
-        CONDITIONAL_JUMP,
-        CALL,
+        ENTRY,
         TRY,
         CATCH,
         FINALLY,
     }
 
-    public static void CoverInstruction(int addr, Script script, Dictionary<int, bool> coveredMap)
+    public enum BranchType
     {
-        Stack<(int returnAddr, int finallyAddr, StackType stackType)> stack = new();
-        stack.Push((-1, -1, StackType.CALL));
+        OK,     // One of the branches may return without exception
+        THROW,  // All branches surely has exceptions, but can be catched
+        ABORT,  // All branches abort, and cannot be catched
+    }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="addr"></param>
+    /// <param name="script"></param>
+    /// <param name="coveredMap"></param>
+    /// <returns>Whether it is possible to return without exception</returns>
+    /// <exception cref="BadScriptException"></exception>
+    /// <exception cref="NotImplementedException"></exception>
+    public static BranchType CoverInstruction(int addr, Script script, Dictionary<int, bool> coveredMap)
+    {
+        Stack<(int returnAddr, int finallyAddr, TryStack stackType)> stack = new();
+        stack.Push((-1, -1, TryStack.ENTRY));
+        bool throwed = false;
         while (stack.Count > 0)
         {
+            goto HANDLE_NORMAL_CASE;
+        HANDLE_THROW:
+            throwed = true;
+            TryStack stackType;
+            int catchAddr; int finallyAddr;
+            do
+                (catchAddr, finallyAddr, stackType) = stack.Pop();
+            while (stackType != TryStack.TRY && stack.Count > 0);
+            if (stackType == TryStack.TRY)
+            {
+                throwed = false;
+                if (catchAddr != -1)
+                {
+                    addr = catchAddr;
+                    stack.Push((-1, finallyAddr, TryStack.CATCH));
+                }
+                else if (finallyAddr != -1)
+                {
+                    addr = finallyAddr;
+                    stack.Push((-1, -1, TryStack.FINALLY));
+                }
+            }
+            continue;
+        HANDLE_NORMAL_CASE:
             if (!coveredMap.ContainsKey(addr))
                 throw new BadScriptException($"wrong address {addr}");
             if (coveredMap[addr])
-            {// We have visited the code. Skip it.
-                (addr, _, _) = stack.Pop();
-                continue;
-            }
+                // We have visited the code. Skip it.
+                return BranchType.OK;
             Instruction instruction = script.GetInstruction(addr);
             coveredMap[addr] = true;
 
+            // TODO: ABORTMSG may THROW instead of ABORT. Just throw new NotImplementedException for ABORTMSG?
             if (instruction.OpCode == OpCode.ABORT || instruction.OpCode == OpCode.ABORTMSG)
-            {
-                StackType stackType;
-                do
-                    (addr, _, stackType) = stack.Pop();
-                while (stackType != StackType.CONDITIONAL_JUMP && stack.Count > 0);
-                continue;
-            }
+                return BranchType.ABORT;
             if (callWithJump.Contains(instruction.OpCode))
             {
-                stack.Push((addr+instruction.Size, 0, StackType.CALL));
+                int callTarget = -1;
                 if (instruction.OpCode == OpCode.CALL)
-                    addr += instruction.TokenI8;
+                    callTarget = addr + instruction.TokenI8;
                 if (instruction.OpCode == OpCode.CALL_L)
-                    addr += instruction.TokenI32;
+                    callTarget = addr + instruction.TokenI32;
                 if (instruction.OpCode == OpCode.CALLA)
-                    throw new NotImplementedException("CALLA is dynamic, not supported");
-                    // addr += instruction.Size;
-                continue;
+                    throw new NotImplementedException("CALLA is dynamic; not supported");
+                BranchType returnedType = CoverInstruction(callTarget, script, coveredMap);
+                if (returnedType == BranchType.OK)
+                {
+                    addr += instruction.Size;
+                    continue;
+                }
+                if (returnedType == BranchType.ABORT)
+                    return BranchType.ABORT;
+                if (returnedType == BranchType.THROW)
+                {
+                }
             }
             if (instruction.OpCode == OpCode.RET)
-            {
-                StackType stackType;
-                do
-                    (addr, _, stackType) = stack.Pop();
-                while (stackType != StackType.CALL && stackType != StackType.CONDITIONAL_JUMP && stack.Count > 0);
-                continue;
-            }
+                return BranchType.OK;
             if (tryThrowFinally.Contains(instruction.OpCode))
             {
                 if (instruction.OpCode == OpCode.TRY)
                     stack.Push((
                         instruction.TokenI8 == 0 ? -1 : addr + instruction.TokenI8,
                         instruction.TokenI8_1 == 0 ? -1 : addr + instruction.TokenI8_1,
-                        StackType.TRY));
+                        TryStack.TRY));
                 if (instruction.OpCode == OpCode.TRY_L)
                     stack.Push((
                         instruction.TokenI32 == 0 ? -1 : addr + instruction.TokenI32,
                         instruction.TokenI32_1 == 0 ? -1 : addr + instruction.TokenI32_1,
-                        StackType.TRY));
+                        TryStack.TRY));
                 if (instruction.OpCode == OpCode.THROW)
-                {
-                    StackType stackType;
-                    int catchAddr; int finallyAddr;
-                    do
-                        (catchAddr, finallyAddr, stackType) = stack.Pop();
-                    while (stackType != StackType.TRY && stackType != StackType.CONDITIONAL_JUMP && stack.Count > 0);
-                    if (stackType == StackType.TRY)
-                    {
-                        if (catchAddr != -1)
-                        {
-                            addr = catchAddr;
-                            stack.Push((-1, finallyAddr, StackType.CATCH));
-                        }
-                        else if (finallyAddr != -1)
-                        {
-                            addr = finallyAddr;
-                            stack.Push((-1, -1, StackType.FINALLY));
-                        }
-                    }
-                    if (stackType == StackType.CONDITIONAL_JUMP)
-                        addr = catchAddr;
-                    continue;
-                }
+                    goto HANDLE_THROW;
                 if (instruction.OpCode == OpCode.ENDTRY)
                 {
-                    (_, int finallyAddr, StackType stackType) = stack.Pop();
-                    if (stackType != StackType.TRY) throw new BadScriptException("No try stack on ENDTRY");
+                    (_, finallyAddr, stackType) = stack.Pop();
+                    if (stackType != TryStack.TRY) throw new BadScriptException("No try stack on ENDTRY");
                     int endPointer = addr + instruction.TokenI8;
                     if (finallyAddr != -1)
                     {
-                        stack.Push((-1, endPointer, StackType.FINALLY));
+                        stack.Push((-1, endPointer, TryStack.FINALLY));
                         addr = finallyAddr;
                         continue;
                     }
@@ -299,12 +313,12 @@ public static class Program
                 }
                 if (instruction.OpCode == OpCode.ENDTRY_L)
                 {
-                    (_, int finallyAddr, StackType stackType) = stack.Pop();
-                    if (stackType != StackType.TRY) throw new BadScriptException("No try stack on ENDTRY");
+                    (_, finallyAddr, stackType) = stack.Pop();
+                    if (stackType != TryStack.TRY) throw new BadScriptException("No try stack on ENDTRY");
                     int endPointer = addr + instruction.TokenI32;
                     if (finallyAddr != -1)
                     {
-                        stack.Push((-1, endPointer, StackType.FINALLY));
+                        stack.Push((-1, endPointer, TryStack.FINALLY));
                         addr = finallyAddr;
                     }
                     else
@@ -313,8 +327,8 @@ public static class Program
                 }
                 if (instruction.OpCode == OpCode.ENDFINALLY)
                 {
-                    (_, addr, StackType stackType) = stack.Pop();
-                    if (stackType != StackType.FINALLY)
+                    (_, addr, stackType) = stack.Pop();
+                    if (stackType != TryStack.FINALLY)
                         throw new BadScriptException("No finally stack on ENDFINALLY");
                     continue;
                 }
@@ -327,22 +341,23 @@ public static class Program
                     addr += instruction.TokenI32;
                 continue;
             }
-            if (conditionalJump.Contains(instruction.OpCode))
+            if (conditionalJump.Contains(instruction.OpCode) || conditionalJump_L.Contains(instruction.OpCode))
             {
-                int jumpOffset = instruction.TokenI8;
-                stack.Push((addr + instruction.Size, -1, StackType.CONDITIONAL_JUMP));
-                addr += jumpOffset;
-                continue;
-            }
-            if (conditionalJump_L.Contains(instruction.OpCode))
-            {
-                int jumpOffset = instruction.TokenI32;
-                stack.Push((addr + instruction.Size, -1, StackType.CONDITIONAL_JUMP));
-                addr += jumpOffset;
-                continue;
+                int jumpAddress = conditionalJump.Contains(instruction.OpCode) ?
+                    addr + instruction.TokenI8 : addr + instruction.TokenI32;
+                BranchType noJump = CoverInstruction(addr + instruction.Size, script, coveredMap);
+                BranchType jump = CoverInstruction(jumpAddress, script, coveredMap);
+                if (noJump == BranchType.OK || jump == BranchType.OK)
+                    return BranchType.OK;
+                if (noJump == BranchType.ABORT && jump == BranchType.ABORT)
+                    return BranchType.ABORT;
+                if (noJump == BranchType.THROW && jump == BranchType.THROW)
+                    goto HANDLE_THROW;
+                throw new Exception($"Unknown BranchType {noJump} {jump}");
             }
 
             addr += instruction.Size;
         }
+        return throwed ? BranchType.THROW : BranchType.OK;
     }
 }
