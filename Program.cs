@@ -426,9 +426,9 @@ public static class Program
                     return BranchType.OK;
                 if (noJump == BranchType.ABORT && jump == BranchType.ABORT)
                     return BranchType.ABORT;
-                if (noJump == BranchType.THROW && jump == BranchType.THROW)
+                if (noJump == BranchType.THROW || jump == BranchType.THROW)  // THROW, ABORT => THROW
                     goto HANDLE_THROW;
-                throw new Exception($"Unknown BranchType {noJump} {jump}");
+                throw new Exception($"Unknown {nameof(BranchType)} {noJump} {jump}");
             }
 
             addr += instruction.Size;
