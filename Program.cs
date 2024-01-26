@@ -2,13 +2,12 @@
 using Neo.Json;
 using Neo.SmartContract;
 using Neo.SmartContract.Manifest;
-using Neo.SmartContract.Native;
 using Neo.VM;
 using DevHawk.DumpNef;
 using static DevHawk.DumpNef.Extensions;
 using static NefOpt.OpCodeTypes;
-using System.Security.Cryptography;
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 public static class Program
 {
@@ -54,9 +53,6 @@ public static class Program
             NefFile nef = reader.ReadSerializable<NefFile>();
             ContractManifest manifest = ContractManifest.Parse(File.ReadAllBytes(manifestPath));
             JToken debugInfo = JObject.Parse(Unzip(File.ReadAllBytes(debugInfoPath)))!;
-            Script script = nef.Script;
-            MethodToken[] methodTokens = nef.Tokens;
-            string padding = script.GetInstructionAddressPadding();
 
             //foreach ((int address, Instruction instruction) in addressAndInstructions)
             //    Console.WriteLine(WriteInstruction(address, instruction, padding, methodTokens));
@@ -78,15 +74,16 @@ public static class Program
             //    else
             //        prevUncoveredAddr = addr;
             //}
-            (nef, manifest, string dumpnef) = RemoveUncoveredInstructions(coveredMap, nef, manifest);
+            (nef, manifest, string dumpnef, debugInfo) = RemoveUncoveredInstructions(coveredMap, nef, manifest, debugInfo);
             File.WriteAllBytes(Path.Combine(directory.FullName, fileNameWithoutExtension + ".optimized.nef"), nef.ToArray());
             File.WriteAllBytes(Path.Combine(directory.FullName, fileNameWithoutExtension + ".optimized.manifest.json"), manifest.ToJson().ToByteArray(true));
             File.WriteAllText(Path.Combine(directory.FullName, fileNameWithoutExtension + ".optimized.nef.txt"), dumpnef);
+            File.WriteAllBytes(Path.Combine(directory.FullName, fileNameWithoutExtension + ".optimized.nefdbgnfo"), Zip(debugInfo.ToByteArray(true), fileNameWithoutExtension + ".optimized.debug.json"));
         }
     }
 
-    public static (NefFile, ContractManifest, string) RemoveUncoveredInstructions(
-        Dictionary<int, bool> coveredMap, NefFile nef, ContractManifest oldManifest)
+    public static (NefFile, ContractManifest, string, JToken) RemoveUncoveredInstructions(
+        Dictionary<int, bool> coveredMap, NefFile nef, ContractManifest oldManifest, JToken oldDebugInfo)
     {
         Script oldScript = nef.Script;
         List<(int, Instruction)> oldAddressAndInstructionsList = oldScript.EnumerateInstructions().ToList();
@@ -157,11 +154,89 @@ public static class Program
         nef.Compiler = System.AppDomain.CurrentDomain.FriendlyName;
         nef.CheckSum = NefFile.ComputeChecksum(nef);
 
+        Dictionary<int, (int docId, int startLine, int startCol, int endLine, int endCol)> newAddrToSequencePoint = new();
+        Dictionary<int, string> newMethodStart = new();
+        Dictionary<int, string> newMethodEnd = new();
+        HashSet<JToken> methodsToRemove = new();
+        foreach (JToken? method in (JArray)oldDebugInfo["methods"]!)
+        {
+            Regex rangeRegex = new Regex(@"(\d+)\-(\d+)");
+            GroupCollection rangeGroups = rangeRegex.Match(method!["range"]!.AsString()).Groups;
+            (int oldMethodStart, int oldMethodEnd) = (int.Parse(rangeGroups[1].ToString()), int.Parse(rangeGroups[2].ToString()));
+            if (!simplifiedInstructionsToAddress.ContainsKey(oldAddressToInstruction[oldMethodStart]))
+            {
+                methodsToRemove.Add(method);
+                continue;
+            }
+            int methodStart = simplifiedInstructionsToAddress[oldAddressToInstruction[oldMethodStart]];
+            int methodEnd = simplifiedInstructionsToAddress[oldAddressToInstruction[oldMethodEnd]];
+            newMethodStart.Add(methodStart, method["id"]!.AsString());  // TODO: same format of method name as dumpnef
+            newMethodEnd.Add(methodEnd, method["id"]!.AsString());
+            method["range"] = $"{methodStart}-{methodEnd}";
+
+            Regex sequencePointRegex = new Regex(@"(\d+)(\[\d+\]\d+\:\d+\-\d+\:\d+)");
+            int previousSequencePoint = methodStart;
+            JArray newSequencePoints = new();
+            foreach (JToken? sequencePoint in (JArray)method!["sequence-points"]!)
+            {
+                GroupCollection sequencePointGroups = sequencePointRegex.Match(sequencePoint!.AsString()).Groups;
+                int startingInstructionAddress = int.Parse(sequencePointGroups[1].ToString());
+                Instruction oldInstruction = oldAddressToInstruction[startingInstructionAddress];
+                if (simplifiedInstructionsToAddress.ContainsKey(oldInstruction))
+                {
+                    startingInstructionAddress = simplifiedInstructionsToAddress[oldInstruction];
+                    newSequencePoints.Add(new JString($"{startingInstructionAddress}{sequencePointGroups[2]}"));
+                    previousSequencePoint = startingInstructionAddress;
+                }
+                else
+                    newSequencePoints.Add(new JString($"{previousSequencePoint}{sequencePointGroups[2]}"));
+                Regex documentRegex = new Regex(@"\[(\d+)\](\d+)\:(\d+)\-(\d+)\:(\d+)");
+                GroupCollection documentGroups = documentRegex.Match(sequencePointGroups[2].ToString()).Groups;
+                newAddrToSequencePoint.Add(previousSequencePoint, (
+                    int.Parse(documentGroups[1].ToString()),
+                    int.Parse(documentGroups[2].ToString()),
+                    int.Parse(documentGroups[3].ToString()),
+                    int.Parse(documentGroups[4].ToString()),
+                    int.Parse(documentGroups[5].ToString())
+                    ));
+            }
+            method["sequence-points"] = newSequencePoints;
+        }
+
+        Dictionary<string, string[]> docPathToContent = new();
         string dumpnef = "";
-        foreach ((int a, Instruction i) in newScript.EnumerateInstructions(print: true).ToList())
+        foreach ((int a, Instruction i) in newScript.EnumerateInstructions(/*print: true*/).ToList())
+        {
+            if (newMethodStart.ContainsKey(a))
+                dumpnef += $"# Method Start {newMethodStart[a]}\n";
+            if (newMethodEnd.ContainsKey(a))
+                dumpnef += $"# Method End {newMethodEnd[a]}\n";
+            if (newAddrToSequencePoint.ContainsKey(a))
+            {
+                var docInfo = newAddrToSequencePoint[a];
+                string docPath = oldDebugInfo["documents"]![docInfo.docId]!.AsString();
+                if (!docPathToContent.ContainsKey(docPath))
+                    docPathToContent.Add(docPath, File.ReadAllLines(docPath).ToArray());
+                if (docInfo.startLine == docInfo.endLine)
+                    dumpnef += $"# Code {Path.GetFileName(docPath)} line {docInfo.startLine}: \"{docPathToContent[docPath][docInfo.startLine-1][(docInfo.startCol-1)..(docInfo.endCol-1)]}\"\n";
+                else
+                    for (int lineIndex = docInfo.startLine; lineIndex <= docInfo.endLine; lineIndex++)
+                    {
+                        string src;
+                        if (lineIndex == docInfo.startLine)
+                            src = docPathToContent[docPath][lineIndex-1][(docInfo.startCol-1)..].Trim();
+                        else if (lineIndex == docInfo.endLine)
+                            src = docPathToContent[docPath][lineIndex-1][..(docInfo.endCol-1)].Trim();
+                        else
+                            src = docPathToContent[docPath][lineIndex-1].Trim();
+                        dumpnef += $"# Code {Path.GetFileName(docPath)} line {docInfo.startLine}: \"{src}\"\n";
+                    }
+            }
             if (a < newScript.Length)
-                dumpnef += WriteInstruction(a, newScript.GetInstruction(a), newScript.GetInstructionAddressPadding(), nef.Tokens) + "\n";
-        return (nef, oldManifest, dumpnef);
+                dumpnef += $"{WriteInstruction(a, newScript.GetInstruction(a), newScript.GetInstructionAddressPadding(), nef.Tokens)}\n";
+        }
+
+        return (nef, oldManifest, dumpnef, oldDebugInfo);
     }
 
     public static Dictionary<int, bool>

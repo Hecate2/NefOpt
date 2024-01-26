@@ -35,6 +35,25 @@ namespace DevHawk.DumpNef
             throw new ArgumentException("No file found in zip archive");
         }
 
+        public static byte[] Zip(byte[] content, string innerFilename)
+        {
+            using (var compressedFileStream = new MemoryStream())
+            {
+                using (var zipArchive = new ZipArchive(compressedFileStream, ZipArchiveMode.Update, false))
+                {
+                    var zipEntry = zipArchive.CreateEntry(innerFilename);
+                    using (var originalFileStream = new MemoryStream(content))
+                    {
+                        using (var zipEntryStream = zipEntry.Open())
+                        {
+                            originalFileStream.CopyTo(zipEntryStream);
+                        }
+                    }
+                }
+                return compressedFileStream.ToArray();
+            }
+        }
+
         public static NefFile CreateExecutable(MethodToken[] methodTokens, Script script)
         {
             NefFile nef = new()
