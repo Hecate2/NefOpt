@@ -345,7 +345,8 @@ public static class Program
                 // We have visited the code. Skip it.
                 return BranchType.OK;
             Instruction instruction = script.GetInstruction(addr);
-            coveredMap[addr] = true;
+            if (instruction.OpCode != OpCode.NOP)
+                coveredMap[addr] = true;
 
             // TODO: ABORTMSG may THROW instead of ABORT. Just throw new NotImplementedException for ABORTMSG?
             if (instruction.OpCode == OpCode.ABORT || instruction.OpCode == OpCode.ABORTMSG)
