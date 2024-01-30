@@ -1,13 +1,10 @@
 ﻿using System.Collections.Immutable;
 using System.Numerics;
 using Neo;
-using IO = Neo.IO;
 using Neo.SmartContract;
 using Neo.SmartContract.Native;
 using Neo.VM;
 using VM = Neo.VM;
-using StackItem = Neo.VM.Types.StackItem;
-using Neo.Json;
 using System.IO.Compression;
 using System.Text;
 
@@ -15,10 +12,6 @@ namespace DevHawk.DumpNef
 {
     public static class Extensions
     {
-        public static ReadOnlySpan<byte> AsSpan(this Script script) => ((ReadOnlyMemory<byte>)script).Span;
-
-        public static UInt160 CalculateScriptHash(this Script script) => Neo.SmartContract.Helper.ToScriptHash(script.AsSpan());
-
         public static string Unzip(byte[] zippedBuffer)
         {
             using var zippedStream = new MemoryStream(zippedBuffer);
@@ -53,64 +46,6 @@ namespace DevHawk.DumpNef
                 return compressedFileStream.ToArray();
             }
         }
-
-        public static NefFile CreateExecutable(MethodToken[] methodTokens, Script script)
-        {
-            NefFile nef = new()
-            {
-                Compiler = $"NefOpt 0.0.1",
-                Source = string.Empty,
-                Tokens = methodTokens,
-                Script = script
-            };
-            nef.CheckSum = NefFile.ComputeChecksum(nef);
-            return nef;
-        }
-
-        public static void RebuildOffsets(this IReadOnlyList<Instruction> instructions)
-        {
-            // TODO
-            int offset = 0;
-            foreach (Instruction instruction in instructions)
-            {
-                //instruction.Offset = offset;
-                offset += instruction.Size;
-            }
-        }
-
-        public static JObject CreateManifest(
-            //string ContractName, HashSet<string> supportedStandards, List<AbiMethod> methodsExported, List<AbiEvent> eventsExported
-        ) // TODO
-        {
-            return new JObject();
-            //return new JObject
-            //{
-            //    ["name"] = ContractName,
-            //    ["groups"] = new JArray(),
-            //    ["features"] = new JObject(),
-            //    ["supportedstandards"] = supportedStandards.OrderBy(p => p).Select(p => (JString)p!).ToArray(),
-            //    ["abi"] = new JObject
-            //    {
-            //        ["methods"] = methodsExported.Select(p => new JObject
-            //        {
-            //            ["name"] = p.Name,
-            //            ["offset"] = GetAbiOffset(p.Symbol),
-            //            ["safe"] = p.Safe,
-            //            ["returntype"] = p.ReturnType,
-            //            ["parameters"] = p.Parameters.Select(p => p.ToJson()).ToArray()
-            //        }).ToArray(),
-            //        ["events"] = eventsExported.Select(p => new JObject
-            //        {
-            //            ["name"] = p.Name,
-            //            ["parameters"] = p.Parameters.Select(p => p.ToJson()).ToArray()
-            //        }).ToArray()
-            //    },
-            //    ["permissions"] = permissions.ToJson(),
-            //    ["trusts"] = trusts.Contains("*") ? "*" : trusts.OrderBy(p => p.Length).ThenBy(p => p).Select(u => new JString(u)).ToArray(),
-            //    ["extra"] = manifestExtra
-            //};
-        }
-
 
         public static string GetInstructionAddressPadding(this Script script)
         {
@@ -164,10 +99,6 @@ namespace DevHawk.DumpNef
                 yield return (address, Instruction.RET);
             }
         }
-
-        public static bool IsBranchInstruction(this Instruction instruction)
-            => instruction.OpCode >= OpCode.JMPIF
-                && instruction.OpCode <= OpCode.JMPLE_L;
 
         public static string GetOperandString(this Instruction instruction)
         {
@@ -292,61 +223,6 @@ namespace DevHawk.DumpNef
                 builder.Append(finallyOffset == 0 ? "no finally block" : $"finally {OffsetComment(finallyOffset)}");
                 return builder.ToString();
             }
-        }
-
-        public static int GetSize(this StackItem item, uint? maxSize = null)
-        {
-            maxSize ??= ExecutionEngineLimits.Default.MaxItemSize;
-            int size = 0;
-            var serialized = new List<VM.Types.CompoundType>();
-            var unserialized = new Stack<StackItem>();
-            unserialized.Push(item);
-            while (unserialized.Count > 0)
-            {
-                item = unserialized.Pop();
-                size++;
-                switch (item)
-                {
-                    case VM.Types.Null _:
-                        break;
-                    case VM.Types.Boolean _:
-                        size += sizeof(bool);
-                        break;
-                    case VM.Types.Integer _:
-                    case VM.Types.ByteString _:
-                    case VM.Types.Buffer _:
-                        {
-                            var span = item.GetSpan();
-                            size += IO.Helper.GetVarSize(span.Length);
-                            size += span.Length;
-                        }
-                        break;
-                    case VM.Types.Array array:
-                        if (serialized.Any(p => ReferenceEquals(p, array)))
-                            throw new NotSupportedException();
-                        serialized.Add(array);
-                        size += IO.Helper.GetVarSize(array.Count);
-                        for (int i = array.Count - 1; i >= 0; i--)
-                            unserialized.Push(array[i]);
-                        break;
-                    case VM.Types.Map map:
-                        if (serialized.Any(p => ReferenceEquals(p, map)))
-                            throw new NotSupportedException();
-                        serialized.Add(map);
-                        size += IO.Helper.GetVarSize(map.Count);
-                        foreach (var pair in map.Reverse())
-                        {
-                            unserialized.Push(pair.Value);
-                            unserialized.Push(pair.Key);
-                        }
-                        break;
-                    default:
-                        throw new NotSupportedException();
-                }
-            }
-
-            if (size > maxSize.Value) throw new InvalidOperationException();
-            return size;
         }
     }
 }
