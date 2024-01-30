@@ -58,6 +58,9 @@ public static class Program
             //    Console.WriteLine(WriteInstruction(address, instruction, padding, methodTokens));
 
             Dictionary<int, bool> coveredMap = FindCoveredInstructions(nef, manifest, debugInfo);
+            //Script script = nef.Script;
+            //string padding = script.GetInstructionAddressPadding();
+            //MethodToken[] methodTokens = nef.Tokens.ToArray();
             //int prevUncoveredAddr = -100;
             //int prevCoveredAddr = -100;
             //bool prevCovered = true;
@@ -215,6 +218,8 @@ public static class Program
             {
                 var docInfo = newAddrToSequencePoint[a];
                 string docPath = oldDebugInfo["documents"]![docInfo.docId]!.AsString();
+                if (oldDebugInfo["document-root"] != null)
+                    docPath = Path.Combine(oldDebugInfo["document-root"]!.AsString(), docPath);
                 if (!docPathToContent.ContainsKey(docPath))
                     docPathToContent.Add(docPath, File.ReadAllLines(docPath).ToArray());
                 if (docInfo.startLine == docInfo.endLine)
@@ -292,14 +297,16 @@ public static class Program
     /// <returns>Whether it is possible to return without exception</returns>
     /// <exception cref="BadScriptException"></exception>
     /// <exception cref="NotImplementedException"></exception>
-    public static BranchType CoverInstruction(int addr, Script script, Dictionary<int, bool> coveredMap)
+    public static BranchType CoverInstruction(int addr, Script script, Dictionary<int, bool> coveredMap, Stack<(int returnAddr, int finallyAddr, TryStack stackType)>? stack = null, bool throwed = false)
     {
-        Stack<(int returnAddr, int finallyAddr, TryStack stackType)> stack = new();
-        stack.Push((-1, -1, TryStack.ENTRY));
-        bool throwed = false;
+        if (stack == null)
+            stack = new();
+        if (stack.Count == 0)
+            stack.Push((-1, -1, TryStack.ENTRY));
         while (stack.Count > 0)
         {
-            goto HANDLE_NORMAL_CASE;
+            if (!throwed)
+                goto HANDLE_NORMAL_CASE;
         HANDLE_THROW:
             throwed = true;
             TryStack stackType;
@@ -307,7 +314,7 @@ public static class Program
             do
                 (catchAddr, finallyAddr, stackType) = stack.Pop();
             while (stackType != TryStack.TRY && stack.Count > 0);
-            if (stackType == TryStack.TRY)
+            if (stackType == TryStack.TRY)  // goto CATCH or FINALLY
             {
                 throwed = false;
                 if (catchAddr != -1)
@@ -316,6 +323,15 @@ public static class Program
                     stack.Push((-1, finallyAddr, TryStack.CATCH));
                 }
                 else if (finallyAddr != -1)
+                {
+                    addr = finallyAddr;
+                    stack.Push((-1, -1, TryStack.FINALLY));
+                }
+            }
+            if (stackType == TryStack.CATCH)  // goto FINALLY
+            {
+                throwed = false;
+                if (finallyAddr != -1)
                 {
                     addr = finallyAddr;
                     stack.Push((-1, -1, TryStack.FINALLY));
@@ -352,8 +368,7 @@ public static class Program
                 if (returnedType == BranchType.ABORT)
                     return BranchType.ABORT;
                 if (returnedType == BranchType.THROW)
-                {
-                }
+                    goto HANDLE_THROW;
             }
             if (instruction.OpCode == OpCode.RET)
                 return BranchType.OK;
@@ -373,14 +388,19 @@ public static class Program
                     goto HANDLE_THROW;
                 if (instruction.OpCode == OpCode.ENDTRY)
                 {
-                    (_, finallyAddr, stackType) = stack.Pop();
-                    if (stackType != TryStack.TRY) throw new BadScriptException("No try stack on ENDTRY");
+                    (catchAddr, finallyAddr, stackType) = stack.Peek();
+                    if (stackType != TryStack.TRY && stackType != TryStack.CATCH) throw new BadScriptException("No try stack on ENDTRY");
+
+                    // Visit catchAddr because there may still be exceptions at runtime
+                    Stack<(int returnAddr, int finallyAddr, TryStack stackType)> newStack = new(stack);
+                    CoverInstruction(catchAddr, script, coveredMap, stack: newStack, throwed: true);
+
+                    stack.Pop();
                     int endPointer = addr + instruction.TokenI8;
                     if (finallyAddr != -1)
                     {
                         stack.Push((-1, endPointer, TryStack.FINALLY));
                         addr = finallyAddr;
-                        continue;
                     }
                     else
                         addr = endPointer;
