@@ -2,9 +2,9 @@
 using Neo.SmartContract;
 using Neo.SmartContract.Manifest;
 using Neo.VM;
+using static Neo.Optimizer.Optimizer;
 using System.Collections;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Text.RegularExpressions;
 using static Neo.Optimizer.OpCodeTypes;
 
@@ -12,22 +12,7 @@ namespace Neo.Optimizer
 {
     public static class Reachability
     {
-        public static int[] OperandSizePrefixTable = new int[256];
-        public static int[] OperandSizeTable = new int[256];
-
-        static Reachability()
-        {
-            foreach (FieldInfo field in typeof(OpCode).GetFields(BindingFlags.Public | BindingFlags.Static))
-            {
-                OperandSizeAttribute? attribute = field.GetCustomAttribute<OperandSizeAttribute>();
-                if (attribute == null) continue;
-                int index = (int)(OpCode)field.GetValue(null)!;
-                OperandSizePrefixTable[index] = attribute.SizePrefix;
-                OperandSizeTable[index] = attribute.Size;
-            }
-
-        }
-
+        [Strategy(Priority = int.MaxValue)]
         public static (NefFile, ContractManifest, JToken) RemoveUncoveredInstructions(
     NefFile nef, ContractManifest manifest, JToken debugInfo)
         {
