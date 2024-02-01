@@ -41,7 +41,6 @@ namespace Neo.Optimizer
                 //foreach ((int address, Instruction instruction) in addressAndInstructions)
                 //    Console.WriteLine(WriteInstruction(address, instruction, padding, methodTokens));
 
-                Dictionary<int, bool> coveredMap = FindCoveredInstructions(nef, manifest, debugInfo);
                 //Script script = nef.Script;
                 //string padding = script.GetInstructionAddressPadding();
                 //MethodToken[] methodTokens = nef.Tokens.ToArray();
@@ -61,7 +60,8 @@ namespace Neo.Optimizer
                 //    else
                 //        prevUncoveredAddr = addr;
                 //}
-                (nef, manifest, string dumpnef, debugInfo) = RemoveUncoveredInstructions(coveredMap, nef, manifest, debugInfo);
+                (nef, manifest, debugInfo) = RemoveUncoveredInstructions(nef, manifest, debugInfo);
+                string dumpnef = GenerateDumpNef(nef, debugInfo);
                 File.WriteAllBytes(Path.Combine(directory.FullName, fileNameWithoutExtension + ".optimized.nef"), nef.ToArray());
                 File.WriteAllBytes(Path.Combine(directory.FullName, fileNameWithoutExtension + ".optimized.manifest.json"), manifest.ToJson().ToByteArray(true));
                 File.WriteAllText(Path.Combine(directory.FullName, fileNameWithoutExtension + ".optimized.nef.txt"), dumpnef);

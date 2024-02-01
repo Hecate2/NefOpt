@@ -1,14 +1,12 @@
-﻿using Neo.IO;
-using Neo.Json;
+﻿using Neo.Json;
 using Neo.SmartContract;
 using Neo.SmartContract.Manifest;
 using Neo.VM;
-using static Neo.Optimizer.DumpNef;
-using static Neo.Optimizer.OpCodeTypes;
-using System.Text.RegularExpressions;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Reflection;
-using System.Collections;
+using System.Text.RegularExpressions;
+using static Neo.Optimizer.OpCodeTypes;
 
 namespace Neo.Optimizer
 {
@@ -30,9 +28,10 @@ namespace Neo.Optimizer
 
         }
 
-        public static (NefFile, ContractManifest, string, JToken) RemoveUncoveredInstructions(
-    Dictionary<int, bool> coveredMap, NefFile nef, ContractManifest oldManifest, JToken oldDebugInfo)
+        public static (NefFile, ContractManifest, JToken) RemoveUncoveredInstructions(
+    NefFile nef, ContractManifest manifest, JToken debugInfo)
         {
+            Dictionary<int, bool> coveredMap = FindCoveredInstructions(nef, manifest, debugInfo);
             Script oldScript = nef.Script;
             List<(int, Instruction)> oldAddressAndInstructionsList = oldScript.EnumerateInstructions().ToList();
             Dictionary<int, Instruction> oldAddressToInstruction = new();
@@ -100,7 +99,7 @@ namespace Neo.Optimizer
                 if (i.Operand.Length != 0)
                     simplifiedScript = simplifiedScript.Concat(i.Operand.ToArray()).ToList();
             }
-            foreach (ContractMethodDescriptor method in oldManifest.Abi.Methods)
+            foreach (ContractMethodDescriptor method in manifest.Abi.Methods)
                 method.Offset = (int)simplifiedInstructionsToAddress[oldAddressToInstruction[method.Offset]]!;
             Script newScript = new Script(simplifiedScript.ToArray());
             nef.Script = newScript;
@@ -111,7 +110,7 @@ namespace Neo.Optimizer
             Dictionary<int, string> newMethodStart = new();
             Dictionary<int, string> newMethodEnd = new();
             HashSet<JToken> methodsToRemove = new();
-            foreach (JToken? method in (JArray)oldDebugInfo["methods"]!)
+            foreach (JToken? method in (JArray)debugInfo["methods"]!)
             {
                 Regex rangeRegex = new Regex(@"(\d+)\-(\d+)");
                 GroupCollection rangeGroups = rangeRegex.Match(method!["range"]!.AsString()).Groups;
@@ -155,43 +154,11 @@ namespace Neo.Optimizer
                 }
                 method["sequence-points"] = newSequencePoints;
             }
+            JArray methods = (JArray)debugInfo["methods"]!;
+            foreach (JToken method in methodsToRemove)
+                methods.Remove(method);
 
-            Dictionary<string, string[]> docPathToContent = new();
-            string dumpnef = "";
-            foreach ((int a, Instruction i) in newScript.EnumerateInstructions(/*print: true*/).ToList())
-            {
-                if (newMethodStart.ContainsKey(a))
-                    dumpnef += $"# Method Start {newMethodStart[a]}\n";
-                if (newMethodEnd.ContainsKey(a))
-                    dumpnef += $"# Method End {newMethodEnd[a]}\n";
-                if (newAddrToSequencePoint.ContainsKey(a))
-                {
-                    var docInfo = newAddrToSequencePoint[a];
-                    string docPath = oldDebugInfo["documents"]![docInfo.docId]!.AsString();
-                    if (oldDebugInfo["document-root"] != null)
-                        docPath = Path.Combine(oldDebugInfo["document-root"]!.AsString(), docPath);
-                    if (!docPathToContent.ContainsKey(docPath))
-                        docPathToContent.Add(docPath, File.ReadAllLines(docPath).ToArray());
-                    if (docInfo.startLine == docInfo.endLine)
-                        dumpnef += $"# Code {Path.GetFileName(docPath)} line {docInfo.startLine}: \"{docPathToContent[docPath][docInfo.startLine - 1][(docInfo.startCol - 1)..(docInfo.endCol - 1)]}\"\n";
-                    else
-                        for (int lineIndex = docInfo.startLine; lineIndex <= docInfo.endLine; lineIndex++)
-                        {
-                            string src;
-                            if (lineIndex == docInfo.startLine)
-                                src = docPathToContent[docPath][lineIndex - 1][(docInfo.startCol - 1)..].Trim();
-                            else if (lineIndex == docInfo.endLine)
-                                src = docPathToContent[docPath][lineIndex - 1][..(docInfo.endCol - 1)].Trim();
-                            else
-                                src = docPathToContent[docPath][lineIndex - 1].Trim();
-                            dumpnef += $"# Code {Path.GetFileName(docPath)} line {docInfo.startLine}: \"{src}\"\n";
-                        }
-                }
-                if (a < newScript.Length)
-                    dumpnef += $"{WriteInstruction(a, newScript.GetInstruction(a), newScript.GetInstructionAddressPadding(), nef.Tokens)}\n";
-            }
-
-            return (nef, oldManifest, dumpnef, oldDebugInfo);
+            return (nef, manifest, debugInfo);
         }
 
         public static Dictionary<int, bool>
