@@ -8,6 +8,7 @@ using static Neo.Optimizer.OpCodeTypes;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Collections;
 
 namespace Neo.Optimizer
 {
@@ -37,7 +38,7 @@ namespace Neo.Optimizer
             Dictionary<int, Instruction> oldAddressToInstruction = new();
             foreach ((int a, Instruction i) in oldAddressAndInstructionsList)
                 oldAddressToInstruction.Add(a, i);
-            Dictionary<Instruction, int> simplifiedInstructionsToAddress = new();
+            System.Collections.Specialized.OrderedDictionary simplifiedInstructionsToAddress = new();
             ConcurrentDictionary<Instruction, Instruction> jumpInstructionSourceToTargets = new();
             ConcurrentDictionary<Instruction, (Instruction, Instruction)> tryInstructionSourceToTargets = new();
             int currentAddress = 0;
@@ -64,15 +65,16 @@ namespace Neo.Optimizer
                     tryInstructionSourceToTargets.TryAdd(i, (oldAddressToInstruction[a + i.TokenI32], oldAddressToInstruction[a + i.TokenI32_1]));
             });
             List<byte> simplifiedScript = new();
-            foreach ((Instruction i, int a) in simplifiedInstructionsToAddress)
+            foreach (DictionaryEntry item in simplifiedInstructionsToAddress)
             {
+                (Instruction i, int a) = ((Instruction)item.Key, (int)item.Value!);
                 simplifiedScript.Add((byte)i.OpCode);
                 int operandSizeLength = OperandSizePrefixTable[(int)i.OpCode];
                 simplifiedScript = simplifiedScript.Concat(BitConverter.GetBytes(i.Operand.Length)[0..operandSizeLength]).ToList();
                 if (jumpInstructionSourceToTargets.ContainsKey(i))
                 {
                     Instruction dst = jumpInstructionSourceToTargets[i];
-                    int delta = simplifiedInstructionsToAddress[dst] - a;
+                    int delta = (int)simplifiedInstructionsToAddress[dst]! - a;
                     if (i.OpCode == OpCode.JMP || conditionalJump.Contains(i.OpCode) || i.OpCode == OpCode.CALL || i.OpCode == OpCode.ENDTRY)
                         simplifiedScript.Add(BitConverter.GetBytes(delta)[0]);
                     if (i.OpCode == OpCode.PUSHA || i.OpCode == OpCode.JMP_L || conditionalJump_L.Contains(i.OpCode) || i.OpCode == OpCode.CALL_L || i.OpCode == OpCode.ENDTRY_L)
@@ -82,7 +84,7 @@ namespace Neo.Optimizer
                 if (tryInstructionSourceToTargets.ContainsKey(i))
                 {
                     (Instruction dst1, Instruction dst2) = tryInstructionSourceToTargets[i];
-                    (int delta1, int delta2) = (simplifiedInstructionsToAddress[dst1] - a, simplifiedInstructionsToAddress[dst2] - a);
+                    (int delta1, int delta2) = ((int)simplifiedInstructionsToAddress[dst1]! - a, (int)simplifiedInstructionsToAddress[dst2]! - a);
                     if (i.OpCode == OpCode.TRY)
                     {
                         simplifiedScript.Add(BitConverter.GetBytes(delta1)[0]);
@@ -99,7 +101,7 @@ namespace Neo.Optimizer
                     simplifiedScript = simplifiedScript.Concat(i.Operand.ToArray()).ToList();
             }
             foreach (ContractMethodDescriptor method in oldManifest.Abi.Methods)
-                method.Offset = simplifiedInstructionsToAddress[oldAddressToInstruction[method.Offset]];
+                method.Offset = (int)simplifiedInstructionsToAddress[oldAddressToInstruction[method.Offset]]!;
             Script newScript = new Script(simplifiedScript.ToArray());
             nef.Script = newScript;
             nef.Compiler = System.AppDomain.CurrentDomain.FriendlyName;
@@ -114,13 +116,13 @@ namespace Neo.Optimizer
                 Regex rangeRegex = new Regex(@"(\d+)\-(\d+)");
                 GroupCollection rangeGroups = rangeRegex.Match(method!["range"]!.AsString()).Groups;
                 (int oldMethodStart, int oldMethodEnd) = (int.Parse(rangeGroups[1].ToString()), int.Parse(rangeGroups[2].ToString()));
-                if (!simplifiedInstructionsToAddress.ContainsKey(oldAddressToInstruction[oldMethodStart]))
+                if (!simplifiedInstructionsToAddress.Contains(oldAddressToInstruction[oldMethodStart]))
                 {
                     methodsToRemove.Add(method);
                     continue;
                 }
-                int methodStart = simplifiedInstructionsToAddress[oldAddressToInstruction[oldMethodStart]];
-                int methodEnd = simplifiedInstructionsToAddress[oldAddressToInstruction[oldMethodEnd]];
+                int methodStart = (int)simplifiedInstructionsToAddress[oldAddressToInstruction[oldMethodStart]]!;
+                int methodEnd = (int)simplifiedInstructionsToAddress[oldAddressToInstruction[oldMethodEnd]]!;
                 newMethodStart.Add(methodStart, method["id"]!.AsString());  // TODO: same format of method name as dumpnef
                 newMethodEnd.Add(methodEnd, method["id"]!.AsString());
                 method["range"] = $"{methodStart}-{methodEnd}";
@@ -133,9 +135,9 @@ namespace Neo.Optimizer
                     GroupCollection sequencePointGroups = sequencePointRegex.Match(sequencePoint!.AsString()).Groups;
                     int startingInstructionAddress = int.Parse(sequencePointGroups[1].ToString());
                     Instruction oldInstruction = oldAddressToInstruction[startingInstructionAddress];
-                    if (simplifiedInstructionsToAddress.ContainsKey(oldInstruction))
+                    if (simplifiedInstructionsToAddress.Contains(oldInstruction))
                     {
-                        startingInstructionAddress = simplifiedInstructionsToAddress[oldInstruction];
+                        startingInstructionAddress = (int)simplifiedInstructionsToAddress[oldInstruction]!;
                         newSequencePoints.Add(new JString($"{startingInstructionAddress}{sequencePointGroups[2]}"));
                         previousSequencePoint = startingInstructionAddress;
                     }
