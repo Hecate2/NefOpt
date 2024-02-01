@@ -1,16 +1,14 @@
 ﻿using System.Collections.Immutable;
 using System.Numerics;
-using Neo;
 using Neo.SmartContract;
 using Neo.SmartContract.Native;
 using Neo.VM;
-using VM = Neo.VM;
 using System.IO.Compression;
 using System.Text;
 
-namespace DevHawk.DumpNef
+namespace Neo.Optimizer
 {
-    public static class Extensions
+    public static class DumpNef
     {
         public static string Unzip(byte[] zippedBuffer)
         {
@@ -79,7 +77,7 @@ namespace DevHawk.DumpNef
             return result;
         }
 
-        public static IEnumerable<(int address, Instruction instruction)> EnumerateInstructions(this Script script, bool print=false)
+        public static IEnumerable<(int address, Instruction instruction)> EnumerateInstructions(this Script script, bool print = false)
         {
             var address = 0;
             var opcode = OpCode.PUSH0;

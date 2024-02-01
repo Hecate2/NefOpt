@@ -1,7 +1,7 @@
 ﻿using Neo.VM;
 using static Neo.VM.OpCode;
 
-namespace NefOpt
+namespace Neo.Optimizer
 {
     public static class OpCodeTypes
     {
