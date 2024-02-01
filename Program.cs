@@ -8,6 +8,7 @@ using static DevHawk.DumpNef.Extensions;
 using static NefOpt.OpCodeTypes;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 
 public static class Program
 {
@@ -94,8 +95,8 @@ public static class Program
         foreach ((int a, Instruction i) in oldAddressAndInstructionsList)
             oldAddressToInstruction.Add(a, i);
         Dictionary<Instruction, int> simplifiedInstructionsToAddress = new();
-        Dictionary<Instruction, Instruction> jumpInstructionSourceToTargets = new();
-        Dictionary<Instruction, (Instruction, Instruction)> tryInstructionSourceToTargets = new();
+        ConcurrentDictionary<Instruction, Instruction> jumpInstructionSourceToTargets = new();
+        ConcurrentDictionary<Instruction, (Instruction, Instruction)> tryInstructionSourceToTargets = new();
         int currentAddress = 0;
         foreach ((int a, Instruction i) in oldAddressAndInstructionsList)
         {
@@ -106,15 +107,19 @@ public static class Program
             }
             else
                 continue;
-            if (i.OpCode == OpCode.JMP || conditionalJump.Contains(i.OpCode) || i.OpCode == OpCode.CALL || i.OpCode == OpCode.ENDTRY)
-                jumpInstructionSourceToTargets.Add(i, oldAddressToInstruction[a+i.TokenI8]);
-            if (i.OpCode == OpCode.PUSHA || i.OpCode == OpCode.JMP_L || conditionalJump_L.Contains(i.OpCode) || i.OpCode == OpCode.CALL_L || i.OpCode == OpCode.ENDTRY_L)
-                jumpInstructionSourceToTargets.Add(i, oldAddressToInstruction[a+i.TokenI32]);
-            if (i.OpCode == OpCode.TRY)
-                tryInstructionSourceToTargets.Add(i, (oldAddressToInstruction[a+i.TokenI8], oldAddressToInstruction[a+i.TokenI8_1]));
-            if (i.OpCode == OpCode.TRY_L)
-                tryInstructionSourceToTargets.Add(i, (oldAddressToInstruction[a+i.TokenI32], oldAddressToInstruction[a+i.TokenI32_1]));
         }
+        Parallel.ForEach(oldAddressAndInstructionsList, item =>
+        {
+            (int a, Instruction i) = (item.Item1, item.Item2);
+            if (i.OpCode == OpCode.JMP || conditionalJump.Contains(i.OpCode) || i.OpCode == OpCode.CALL || i.OpCode == OpCode.ENDTRY)
+                jumpInstructionSourceToTargets.TryAdd(i, oldAddressToInstruction[a+i.TokenI8]);
+            if (i.OpCode == OpCode.PUSHA || i.OpCode == OpCode.JMP_L || conditionalJump_L.Contains(i.OpCode) || i.OpCode == OpCode.CALL_L || i.OpCode == OpCode.ENDTRY_L)
+                jumpInstructionSourceToTargets.TryAdd(i, oldAddressToInstruction[a+i.TokenI32]);
+            if (i.OpCode == OpCode.TRY)
+                tryInstructionSourceToTargets.TryAdd(i, (oldAddressToInstruction[a+i.TokenI8], oldAddressToInstruction[a+i.TokenI8_1]));
+            if (i.OpCode == OpCode.TRY_L)
+                tryInstructionSourceToTargets.TryAdd(i, (oldAddressToInstruction[a+i.TokenI32], oldAddressToInstruction[a+i.TokenI32_1]));
+        });
         List<byte> simplifiedScript = new();
         foreach ((Instruction i, int a) in simplifiedInstructionsToAddress)
         {
@@ -256,8 +261,9 @@ public static class Program
         foreach (ContractMethodDescriptor method in manifest.Abi.Methods)
             publicMethodStartingAddressToName.Add(method.Offset, method.Name);
 
-        foreach (ContractMethodDescriptor method in manifest.Abi.Methods)
-            CoverInstruction(method.Offset, script, coveredMap);
+        Parallel.ForEach(manifest.Abi.Methods, method =>
+            CoverInstruction(method.Offset, script, coveredMap)
+        );
         // start from _deploy method
         foreach (JToken? method in (JArray)debugInfo["methods"]!)
         {
