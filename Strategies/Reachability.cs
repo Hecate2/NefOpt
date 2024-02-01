@@ -2,19 +2,19 @@
 using Neo.SmartContract;
 using Neo.SmartContract.Manifest;
 using Neo.VM;
-using static Neo.Optimizer.Optimizer;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using static Neo.Optimizer.JumpTarget;
 using static Neo.Optimizer.OpCodeTypes;
+using static Neo.Optimizer.Optimizer;
 
 namespace Neo.Optimizer
 {
     public static class Reachability
     {
         [Strategy(Priority = int.MaxValue)]
-        public static (NefFile, ContractManifest, JToken) RemoveUncoveredInstructions(
-    NefFile nef, ContractManifest manifest, JToken debugInfo)
+        public static (NefFile, ContractManifest, JToken) RemoveUncoveredInstructions(NefFile nef, ContractManifest manifest, JToken debugInfo)
         {
             Dictionary<int, bool> coveredMap = FindCoveredInstructions(nef, manifest, debugInfo);
             Script oldScript = nef.Script;
@@ -23,8 +23,6 @@ namespace Neo.Optimizer
             foreach ((int a, Instruction i) in oldAddressAndInstructionsList)
                 oldAddressToInstruction.Add(a, i);
             System.Collections.Specialized.OrderedDictionary simplifiedInstructionsToAddress = new();
-            ConcurrentDictionary<Instruction, Instruction> jumpInstructionSourceToTargets = new();
-            ConcurrentDictionary<Instruction, (Instruction, Instruction)> tryInstructionSourceToTargets = new();
             int currentAddress = 0;
             foreach ((int a, Instruction i) in oldAddressAndInstructionsList)
             {
@@ -36,18 +34,10 @@ namespace Neo.Optimizer
                 else
                     continue;
             }
-            Parallel.ForEach(oldAddressAndInstructionsList, item =>
-            {
-                (int a, Instruction i) = (item.Item1, item.Item2);
-                if (i.OpCode == OpCode.JMP || conditionalJump.Contains(i.OpCode) || i.OpCode == OpCode.CALL || i.OpCode == OpCode.ENDTRY)
-                    jumpInstructionSourceToTargets.TryAdd(i, oldAddressToInstruction[a + i.TokenI8]);
-                if (i.OpCode == OpCode.PUSHA || i.OpCode == OpCode.JMP_L || conditionalJump_L.Contains(i.OpCode) || i.OpCode == OpCode.CALL_L || i.OpCode == OpCode.ENDTRY_L)
-                    jumpInstructionSourceToTargets.TryAdd(i, oldAddressToInstruction[a + i.TokenI32]);
-                if (i.OpCode == OpCode.TRY)
-                    tryInstructionSourceToTargets.TryAdd(i, (oldAddressToInstruction[a + i.TokenI8], oldAddressToInstruction[a + i.TokenI8_1]));
-                if (i.OpCode == OpCode.TRY_L)
-                    tryInstructionSourceToTargets.TryAdd(i, (oldAddressToInstruction[a + i.TokenI32], oldAddressToInstruction[a + i.TokenI32_1]));
-            });
+            (ConcurrentDictionary<Instruction, Instruction> jumpInstructionSourceToTargets,
+            ConcurrentDictionary<Instruction, (Instruction, Instruction)> tryInstructionSourceToTargets)
+            = FindAllJumpAndTrySourceToTargets(oldAddressAndInstructionsList);
+
             List<byte> simplifiedScript = new();
             foreach (DictionaryEntry item in simplifiedInstructionsToAddress)
             {
@@ -200,12 +190,12 @@ namespace Neo.Optimizer
         /// <returns>Whether it is possible to return without exception</returns>
         /// <exception cref="BadScriptException"></exception>
         /// <exception cref="NotImplementedException"></exception>
-        public static BranchType CoverInstruction(int addr, Script script, Dictionary<int, bool> coveredMap, Stack<(int returnAddr, int finallyAddr, TryStack stackType)>? stack = null, bool throwed = false)
+        public static BranchType CoverInstruction(int addr, Script script, Dictionary<int, bool> coveredMap, Stack<((int returnAddr, int finallyAddr), TryStack stackType)>? stack = null, bool throwed = false)
         {
             if (stack == null)
                 stack = new();
             if (stack.Count == 0)
-                stack.Push((-1, -1, TryStack.ENTRY));
+                stack.Push(((-1, -1), TryStack.ENTRY));
             while (stack.Count > 0)
             {
                 if (!throwed)
@@ -215,7 +205,7 @@ namespace Neo.Optimizer
                 TryStack stackType;
                 int catchAddr; int finallyAddr;
                 do
-                    (catchAddr, finallyAddr, stackType) = stack.Pop();
+                    ((catchAddr, finallyAddr), stackType) = stack.Pop();
                 while (stackType != TryStack.TRY && stack.Count > 0);
                 if (stackType == TryStack.TRY)  // goto CATCH or FINALLY
                 {
@@ -223,12 +213,12 @@ namespace Neo.Optimizer
                     if (catchAddr != -1)
                     {
                         addr = catchAddr;
-                        stack.Push((-1, finallyAddr, TryStack.CATCH));
+                        stack.Push(((-1, finallyAddr), TryStack.CATCH));
                     }
                     else if (finallyAddr != -1)
                     {
                         addr = finallyAddr;
-                        stack.Push((-1, -1, TryStack.FINALLY));
+                        stack.Push(((-1, -1), TryStack.FINALLY));
                     }
                 }
                 if (stackType == TryStack.CATCH)  // goto FINALLY
@@ -237,7 +227,7 @@ namespace Neo.Optimizer
                     if (finallyAddr != -1)
                     {
                         addr = finallyAddr;
-                        stack.Push((-1, -1, TryStack.FINALLY));
+                        stack.Push(((-1, -1), TryStack.FINALLY));
                     }
                 }
                 continue;
@@ -256,13 +246,7 @@ namespace Neo.Optimizer
                     return BranchType.ABORT;
                 if (callWithJump.Contains(instruction.OpCode))
                 {
-                    int callTarget = -1;
-                    if (instruction.OpCode == OpCode.CALL)
-                        callTarget = addr + instruction.TokenI8;
-                    if (instruction.OpCode == OpCode.CALL_L)
-                        callTarget = addr + instruction.TokenI32;
-                    if (instruction.OpCode == OpCode.CALLA)
-                        throw new NotImplementedException("CALLA is dynamic; not supported");
+                    int callTarget = ComputeJumpTarget(addr, instruction);
                     BranchType returnedType = CoverInstruction(callTarget, script, coveredMap);
                     if (returnedType == BranchType.OK)
                     {
@@ -278,32 +262,24 @@ namespace Neo.Optimizer
                     return BranchType.OK;
                 if (tryThrowFinally.Contains(instruction.OpCode))
                 {
-                    if (instruction.OpCode == OpCode.TRY)
-                        stack.Push((
-                            instruction.TokenI8 == 0 ? -1 : addr + instruction.TokenI8,
-                            instruction.TokenI8_1 == 0 ? -1 : addr + instruction.TokenI8_1,
-                            TryStack.TRY));
-                    if (instruction.OpCode == OpCode.TRY_L)
-                        stack.Push((
-                            instruction.TokenI32 == 0 ? -1 : addr + instruction.TokenI32,
-                            instruction.TokenI32_1 == 0 ? -1 : addr + instruction.TokenI32_1,
-                            TryStack.TRY));
+                    if (instruction.OpCode == OpCode.TRY || instruction.OpCode == OpCode.TRY_L)
+                        stack.Push((ComputeTryTarget(addr, instruction), TryStack.TRY));
                     if (instruction.OpCode == OpCode.THROW)
                         goto HANDLE_THROW;
                     if (instruction.OpCode == OpCode.ENDTRY)
                     {
-                        (catchAddr, finallyAddr, stackType) = stack.Peek();
+                        ((catchAddr, finallyAddr), stackType) = stack.Peek();
                         if (stackType != TryStack.TRY && stackType != TryStack.CATCH) throw new BadScriptException("No try stack on ENDTRY");
 
                         // Visit catchAddr because there may still be exceptions at runtime
-                        Stack<(int returnAddr, int finallyAddr, TryStack stackType)> newStack = new(stack);
+                        Stack<((int returnAddr, int finallyAddr), TryStack stackType)> newStack = new(stack);
                         CoverInstruction(catchAddr, script, coveredMap, stack: newStack, throwed: true);
 
                         stack.Pop();
                         int endPointer = addr + instruction.TokenI8;
                         if (finallyAddr != -1)
                         {
-                            stack.Push((-1, endPointer, TryStack.FINALLY));
+                            stack.Push(((-1, endPointer), TryStack.FINALLY));
                             addr = finallyAddr;
                         }
                         else
@@ -312,12 +288,12 @@ namespace Neo.Optimizer
                     }
                     if (instruction.OpCode == OpCode.ENDTRY_L)
                     {
-                        (_, finallyAddr, stackType) = stack.Pop();
+                        ((_, finallyAddr), stackType) = stack.Pop();
                         if (stackType != TryStack.TRY) throw new BadScriptException("No try stack on ENDTRY");
                         int endPointer = addr + instruction.TokenI32;
                         if (finallyAddr != -1)
                         {
-                            stack.Push((-1, endPointer, TryStack.FINALLY));
+                            stack.Push(((-1, endPointer), TryStack.FINALLY));
                             addr = finallyAddr;
                         }
                         else
@@ -326,7 +302,7 @@ namespace Neo.Optimizer
                     }
                     if (instruction.OpCode == OpCode.ENDFINALLY)
                     {
-                        (_, addr, stackType) = stack.Pop();
+                        ((_, addr), stackType) = stack.Pop();
                         if (stackType != TryStack.FINALLY)
                             throw new BadScriptException("No finally stack on ENDFINALLY");
                         continue;
@@ -334,18 +310,14 @@ namespace Neo.Optimizer
                 }
                 if (unconditionalJump.Contains(instruction.OpCode))
                 {
-                    if (instruction.OpCode == OpCode.JMP)
-                        addr += instruction.TokenI8;
-                    if (instruction.OpCode == OpCode.JMP_L)
-                        addr += instruction.TokenI32;
+                    addr = ComputeJumpTarget(addr, instruction);
                     continue;
                 }
                 if (conditionalJump.Contains(instruction.OpCode) || conditionalJump_L.Contains(instruction.OpCode))
                 {
-                    int jumpAddress = conditionalJump.Contains(instruction.OpCode) ?
-                        addr + instruction.TokenI8 : addr + instruction.TokenI32;
+                    int targetAddress = ComputeJumpTarget(addr, instruction);
                     BranchType noJump = CoverInstruction(addr + instruction.Size, script, coveredMap);
-                    BranchType jump = CoverInstruction(jumpAddress, script, coveredMap);
+                    BranchType jump = CoverInstruction(targetAddress, script, coveredMap);
                     if (noJump == BranchType.OK || jump == BranchType.OK)
                         return BranchType.OK;
                     if (noJump == BranchType.ABORT && jump == BranchType.ABORT)

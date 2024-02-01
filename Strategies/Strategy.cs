@@ -1,6 +1,6 @@
-﻿using Neo.SmartContract.Manifest;
+﻿using Neo.Json;
 using Neo.SmartContract;
-using Neo.Json;
+using Neo.SmartContract.Manifest;
 using Neo.VM;
 using System.Reflection;
 
