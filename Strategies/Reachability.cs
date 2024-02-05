@@ -5,7 +5,7 @@ using Neo.VM;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
-using static Neo.Optimizer.JumpTarget;
+using static Neo.Optimizer.JumpTargetAnalyser;
 using static Neo.Optimizer.OpCodeTypes;
 using static Neo.Optimizer.Optimizer;
 
@@ -144,10 +144,6 @@ namespace Neo.Optimizer
             foreach ((int addr, Instruction inst) in script.EnumerateInstructions())
                 coveredMap.Add(addr, false);
 
-            Dictionary<int, string> publicMethodStartingAddressToName = new();
-            foreach (ContractMethodDescriptor method in manifest.Abi.Methods)
-                publicMethodStartingAddressToName.Add(method.Offset, method.Name);
-
             Parallel.ForEach(manifest.Abi.Methods, method =>
                 CoverInstruction(method.Offset, script, coveredMap)
             );
@@ -164,21 +160,6 @@ namespace Neo.Optimizer
                 }
             }
             return coveredMap;
-        }
-
-        public enum TryStack
-        {
-            ENTRY,
-            TRY,
-            CATCH,
-            FINALLY,
-        }
-
-        public enum BranchType
-        {
-            OK,     // One of the branches may return without exception
-            THROW,  // All branches surely has exceptions, but can be catched
-            ABORT,  // All branches abort, and cannot be catched
         }
 
         /// <summary>
@@ -200,7 +181,7 @@ namespace Neo.Optimizer
             {
                 if (!throwed)
                     goto HANDLE_NORMAL_CASE;
-                HANDLE_THROW:
+            HANDLE_THROW:
                 throwed = true;
                 TryStack stackType;
                 int catchAddr; int finallyAddr;

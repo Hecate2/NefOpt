@@ -6,7 +6,22 @@ using static Neo.VM.OpCode;
 
 namespace Neo.Optimizer
 {
-    public static class JumpTarget
+    public enum TryStack
+    {
+        ENTRY,
+        TRY,
+        CATCH,
+        FINALLY,
+    }
+
+    public enum BranchType
+    {
+        OK,     // One of the branches may return without exception
+        THROW,  // All branches surely has exceptions, but can be catched
+        ABORT,  // All branches abort, and cannot be catched
+    }
+
+    public static class JumpTargetAnalyser
     {
         public static bool SingleJumpInOperand(Instruction instruction) => SingleJumpInOperand(instruction.OpCode);
         public static bool SingleJumpInOperand(OpCode opcode)
@@ -15,7 +30,7 @@ namespace Neo.Optimizer
             if (conditionalJump_L.Contains(opcode)) return true;
             if (unconditionalJump.Contains(opcode)) return true;
             if (callWithJump.Contains(opcode)) return true;
-            if (opcode == ENDTRY || opcode == ENDTRY_L || opcode == PUSHA) return true;
+            if (opcode == ENDTRY || opcode == ENDTRY_L) return true;
             return false;
         }
 
@@ -45,7 +60,7 @@ namespace Neo.Optimizer
                     throw new NotImplementedException($"Unknown instruction {instruction.OpCode}");
             }
         }
-        public static (int, int) ComputeTryTarget(int addr, Instruction instruction)
+        public static (int catchTarget, int finallyTarget) ComputeTryTarget(int addr, Instruction instruction)
         {
             switch (instruction.OpCode)
             {
@@ -83,7 +98,7 @@ namespace Neo.Optimizer
             Parallel.ForEach(addressAndInstructionsList, item =>
             {
                 (int a, Instruction i) = (item.Item1, item.Item2);
-                if (SingleJumpInOperand(i))
+                if (SingleJumpInOperand(i) || i.OpCode == PUSHA)
                     jumpSourceToTargets.TryAdd(i, addressToInstruction[ComputeJumpTarget(a, i)]);
                 if (i.OpCode == TRY)
                     trySourceToTargets.TryAdd(i, (addressToInstruction[a + i.TokenI8], addressToInstruction[a + i.TokenI8_1]));

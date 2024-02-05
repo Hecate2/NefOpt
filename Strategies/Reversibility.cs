@@ -9,7 +9,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using static Neo.Optimizer.JumpTarget;
+using static Neo.Optimizer.JumpTargetAnalyser;
 using static Neo.Optimizer.OpCodeTypes;
 using static Neo.Optimizer.Optimizer;
 using static Neo.VM.OpCode;
@@ -24,7 +24,7 @@ namespace Neo.Optimizer
         {
             reversibleOpCodes.Add(new OpCode[] { PACK, UNPACK });
             reversibleOpCodes.Add(new OpCode[] { UNPACK, PACK });
-            foreach (OpCode op in OpCodeTypes.push)
+            foreach (OpCode op in OpCodeTypes.allPushes)
                 reversibleOpCodes.Add(new OpCode[] { op, DROP });
         }
 

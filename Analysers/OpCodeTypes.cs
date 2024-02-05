@@ -5,6 +5,7 @@ namespace Neo.Optimizer
 {
     public static class OpCodeTypes
     {
+        #region push
         public static HashSet<OpCode> pushInt = new HashSet<OpCode>
         {
             PUSHINT8,
@@ -57,25 +58,10 @@ namespace Neo.Optimizer
             NEWSTRUCT0,
             NEWMAP,
         };
-        public static HashSet<OpCode> push = new();
-        static OpCodeTypes()
-        {
-            foreach (OpCode op in pushInt)
-                push.Add(op);
-            foreach (OpCode op in pushBool)
-                push.Add(op);
-            push.Add(PUSHA);
-            push.Add(PUSHNULL);
-            foreach (OpCode op in pushData)
-                push.Add(op);
-            foreach (OpCode op in pushConst)
-                push.Add(op);
-            foreach (OpCode op in pushStackOps)
-                push.Add(op);
-            foreach (OpCode op in pushNewCompoundType)
-                push.Add(op);
-        }
+        public static HashSet<OpCode> allPushes = new();
+        #endregion
 
+        #region jump
         // BE AWARE that PUSHA is also related to addresses
         public static HashSet<OpCode> tryThrowFinally = new HashSet<OpCode>
         {
@@ -119,5 +105,30 @@ namespace Neo.Optimizer
             JMPLT_L,
             JMPLE_L,
         };
+        public static HashSet<OpCode> exceptions = new HashSet<OpCode>
+        {
+            THROW,
+            ABORT,
+        };
+        public static HashSet<OpCode> allEndsOfBasicBlock = new();
+        #endregion
+
+        static OpCodeTypes()
+        {
+            foreach (OpCode op in pushInt) allPushes.Add(op);
+            foreach (OpCode op in pushBool) allPushes.Add(op);
+            allPushes.Add(PUSHA);
+            allPushes.Add(PUSHNULL);
+            foreach (OpCode op in pushData) allPushes.Add(op);
+            foreach (OpCode op in pushConst) allPushes.Add(op);
+            foreach (OpCode op in pushStackOps) allPushes.Add(op);
+            foreach (OpCode op in pushNewCompoundType) allPushes.Add(op);
+
+            foreach (OpCode op in tryThrowFinally) allEndsOfBasicBlock.Add(op);
+            foreach (OpCode op in unconditionalJump) allEndsOfBasicBlock.Add(op);
+            foreach (OpCode op in conditionalJump_L) allEndsOfBasicBlock.Add(op);
+            foreach (OpCode op in exceptions) allEndsOfBasicBlock.Add(op);
+            allEndsOfBasicBlock.Add(RET);
+        }
     }
 }
