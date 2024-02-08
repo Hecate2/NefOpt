@@ -18,7 +18,7 @@ namespace Neo.Optimizer
         public static string Unzip(byte[] zippedBuffer)
         {
             using var zippedStream = new MemoryStream(zippedBuffer);
-            using var archive = new ZipArchive(zippedStream);
+            using var archive = new ZipArchive(zippedStream, ZipArchiveMode.Read, false, Encoding.UTF8);
             var entry = archive.Entries.FirstOrDefault();
             if (entry != null)
             {
@@ -99,13 +99,7 @@ namespace Neo.Optimizer
                 yield return (address, Instruction.RET);
         }
 
-        public static string GetOperandString(this Instruction instruction)
-        {
-            string result = "";
-            foreach(byte b in instruction.Operand.Span)
-                result += $"{b.ToString("X2")}-";
-            return result.TrimEnd('-');
-        }
+        public static string GetOperandString(this Instruction instruction) => BitConverter.ToString(instruction.Operand.Span.ToArray());
 
         public static string GetComment(this Instruction instruction, int ip, MethodToken[]? tokens = null)
         {
