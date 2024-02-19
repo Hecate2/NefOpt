@@ -118,14 +118,6 @@ namespace Neo.Optimizer
                     else
                         newSequencePoints.Add(new JString($"{previousSequencePoint}{sequencePointGroups[2]}"));
                     Regex documentRegex = new Regex(@"\[(\d+)\](\d+)\:(\d+)\-(\d+)\:(\d+)", RegexOptions.Compiled);
-                    GroupCollection documentGroups = documentRegex.Match(sequencePointGroups[2].ToString()).Groups;
-                    newAddrToSequencePoint.Add(previousSequencePoint, (
-                        int.Parse(documentGroups[1].ToString()),
-                        int.Parse(documentGroups[2].ToString()),
-                        int.Parse(documentGroups[3].ToString()),
-                        int.Parse(documentGroups[4].ToString()),
-                        int.Parse(documentGroups[5].ToString())
-                        ));
                 }
                 method["sequence-points"] = newSequencePoints;
             }
@@ -255,7 +247,7 @@ namespace Neo.Optimizer
                         if (stackType != TryStack.TRY && stackType != TryStack.CATCH)
                             throw new BadScriptException("No try stack on ENDTRY");
 
-                        if (stackType == TryStack.TRY)
+                        if (stackType == TryStack.TRY && catchAddr != -1)
                         {
                             // Visit catchAddr because there may still be exceptions at runtime
                             Stack<((int returnAddr, int finallyAddr), TryStack stackType)> newStack = new(stack.Reverse());
