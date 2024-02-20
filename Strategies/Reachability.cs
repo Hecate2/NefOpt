@@ -240,7 +240,17 @@ namespace Neo.Optimizer
                         goto HANDLE_THROW;
                 }
                 if (instruction.OpCode == OpCode.RET)
+                {
+                    // See if we are in a try. There may still be runtime exceptions
+                    ((catchAddr, finallyAddr), stackType) = stack.Peek();
+                    if (stackType == TryStack.TRY && catchAddr != -1)
+                        // Visit catchAddr because there may still be exceptions at runtime
+                        CoverInstruction(catchAddr, script, coveredMap, stack: new(stack.Reverse()), throwed: true);
+                    if (stackType == TryStack.CATCH && finallyAddr!= -1)
+                        // Visit finallyAddr because there may still be exceptions at runtime
+                        CoverInstruction(finallyAddr, script, coveredMap, stack: new(stack.Reverse()), throwed: true);
                     return BranchType.OK;
+                }
                 if (tryThrowFinally.Contains(instruction.OpCode))
                 {
                     if (instruction.OpCode == OpCode.TRY || instruction.OpCode == OpCode.TRY_L)
