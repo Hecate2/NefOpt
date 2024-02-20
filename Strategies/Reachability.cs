@@ -235,7 +235,17 @@ namespace Neo.Optimizer
                         continue;
                     }
                     if (returnedType == BranchType.ABORT)
+                    {
+                        // See if we are in a try. There may still be runtime exceptions
+                        ((catchAddr, finallyAddr), stackType) = stack.Peek();
+                        if (stackType == TryStack.TRY && catchAddr != -1)
+                            // Visit catchAddr because there may still be exceptions at runtime
+                            return CoverInstruction(catchAddr, script, coveredMap, stack: new(stack.Reverse()), throwed: true);
+                        if (stackType == TryStack.CATCH && finallyAddr!= -1)
+                            // Visit finallyAddr because there may still be exceptions at runtime
+                            return CoverInstruction(finallyAddr, script, coveredMap, stack: new(stack.Reverse()), throwed: true);
                         return BranchType.ABORT;
+                    }
                     if (returnedType == BranchType.THROW)
                         goto HANDLE_THROW;
                 }
