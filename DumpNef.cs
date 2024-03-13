@@ -1,16 +1,20 @@
-﻿using Neo.Json;
+using Neo.Json;
 using Neo.SmartContract;
 using Neo.SmartContract.Native;
 using Neo.VM;
+using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Neo.Optimizer
 {
-    public static class DumpNef
+    static class DumpNef
     {
 #pragma warning disable SYSLIB1045 // Convert to 'GeneratedRegexAttribute'.
         private static readonly Regex DocumentRegex = new(@"\[(\d+)\](\d+)\:(\d+)\-(\d+)\:(\d+)", RegexOptions.Compiled);
@@ -98,7 +102,7 @@ namespace Neo.Optimizer
                 instruction = script.GetInstruction(address);
                 opcode = instruction.OpCode;
                 if (print)
-                    Console.WriteLine(WriteInstruction(address, instruction, "0000", new MethodToken[] { }));
+                    Console.WriteLine(WriteInstruction(address, instruction, "0000", Array.Empty<MethodToken>()));
                 yield return (address, instruction);
             }
             if (opcode != OpCode.RET)
@@ -207,6 +211,32 @@ namespace Neo.Optimizer
             }
         }
 
+        public static (int start, int end) GetMethodStartEndAddress(string name, JToken debugInfo)
+        {
+            name = name.Length == 0 ? string.Empty : name[0].ToString().ToUpper() + name.Substring(1);  // first letter uppercase
+            int start = -1, end = -1;
+            foreach (JToken? method in (JArray)debugInfo["methods"]!)
+            {
+                string methodName = method!["name"]!.AsString().Split(",")[1];
+                if (methodName == name)
+                {
+                    GroupCollection rangeGroups = RangeRegex.Match(method!["range"]!.AsString()).Groups;
+                    (start, end) = (int.Parse(rangeGroups[1].ToString()), int.Parse(rangeGroups[2].ToString()));
+                }
+            }
+            return (start, end);
+        }
+
+        public static List<int> OpCodeAddressesInMethod(NefFile nef, JToken DebugInfo, string method, OpCode opcode)
+        {
+            (int start, int end) = GetMethodStartEndAddress(method, DebugInfo);
+            List<(int a, VM.Instruction i)> instructions = EnumerateInstructions(nef.Script).ToList();
+            return instructions.Where(
+                ai => ai.i.OpCode == opcode &&
+                ai.a >= start && ai.a <= end
+                ).Select(ai => ai.a).ToList();
+        }
+
         public static string GenerateDumpNef(NefFile nef, JToken debugInfo)
         {
             Script script = nef.Script;
@@ -217,6 +247,7 @@ namespace Neo.Optimizer
             Dictionary<int, string> methodStartAddrToName = new();
             Dictionary<int, string> methodEndAddrToName = new();
             Dictionary<int, List<(int docId, int startLine, int startCol, int endLine, int endCol)>> newAddrToSequencePoint = new();
+
             foreach (JToken? method in (JArray)debugInfo["methods"]!)
             {
                 GroupCollection rangeGroups = RangeRegex.Match(method!["range"]!.AsString()).Groups;

@@ -1,12 +1,32 @@
-﻿using Neo.VM;
+using Neo.VM;
+using System.Collections.Generic;
 using static Neo.VM.OpCode;
 
 namespace Neo.Optimizer
 {
-    public static class OpCodeTypes
+    static class OpCodeTypes
     {
-        #region push
-        public static readonly HashSet<OpCode> pushInt = new HashSet<OpCode>
+        public static readonly HashSet<OpCode> push = new();
+
+        static OpCodeTypes()
+        {
+            foreach (OpCode op in pushInt)
+                push.Add(op);
+            foreach (OpCode op in pushBool)
+                push.Add(op);
+            push.Add(PUSHA);
+            push.Add(PUSHNULL);
+            foreach (OpCode op in pushData)
+                push.Add(op);
+            foreach (OpCode op in pushConst)
+                push.Add(op);
+            foreach (OpCode op in pushStackOps)
+                push.Add(op);
+            foreach (OpCode op in pushNewCompoundType)
+                push.Add(op);
+        }
+
+        public static readonly HashSet<OpCode> pushInt = new()
         {
             PUSHINT8,
             PUSHINT16,
@@ -15,17 +35,20 @@ namespace Neo.Optimizer
             PUSHINT128,
             PUSHINT256,
         };
-        public static readonly HashSet<OpCode> pushBool = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> pushBool = new()
         {
             PUSHT, PUSHF,
         };
-        public static readonly HashSet<OpCode> pushData = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> pushData = new()
         {
             PUSHDATA1,
             PUSHDATA2,
             PUSHDATA4,
         };
-        public static readonly HashSet<OpCode> pushConst = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> pushConst = new()
         {
             PUSHM1,
             PUSH0,
@@ -46,24 +69,23 @@ namespace Neo.Optimizer
             PUSH15,
             PUSH16,
         };
-        public static readonly HashSet<OpCode> pushStackOps = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> pushStackOps = new()
         {
             DEPTH,
             DUP,
             OVER,
         };
-        public static readonly HashSet<OpCode> pushNewCompoundType = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> pushNewCompoundType = new()
         {
             NEWARRAY0,
             NEWSTRUCT0,
             NEWMAP,
         };
-        public static readonly HashSet<OpCode> allPushes = new();
-        #endregion
 
-        #region jump
         // BE AWARE that PUSHA is also related to addresses
-        public static readonly HashSet<OpCode> tryThrowFinally = new HashSet<OpCode>
+        public static readonly HashSet<OpCode> tryThrowFinally = new()
         {
             TRY,
             TRY_L,
@@ -72,18 +94,21 @@ namespace Neo.Optimizer
             ENDTRY_L,
             ENDFINALLY,
         };
-        public static readonly HashSet<OpCode> unconditionalJump = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> unconditionalJump = new()
         {
             JMP,
             JMP_L,
         };
-        public static readonly HashSet<OpCode> callWithJump = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> callWithJump = new()
         {
             CALL,
             CALL_L,
             CALLA,
         };
-        public static readonly HashSet<OpCode> conditionalJump = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> conditionalJump = new()
         {
             JMPIF,
             JMPIFNOT,
@@ -94,7 +119,8 @@ namespace Neo.Optimizer
             JMPLT,
             JMPLE,
         };
-        public static readonly HashSet<OpCode> conditionalJump_L = new HashSet<OpCode>
+
+        public static readonly HashSet<OpCode> conditionalJump_L = new()
         {
             JMPIF_L,
             JMPIFNOT_L,
@@ -105,30 +131,5 @@ namespace Neo.Optimizer
             JMPLT_L,
             JMPLE_L,
         };
-        public static readonly HashSet<OpCode> exceptions = new HashSet<OpCode>
-        {
-            THROW,
-            ABORT,
-        };
-        public static readonly HashSet<OpCode> allEndsOfBasicBlock = new();
-        #endregion
-
-        static OpCodeTypes()
-        {
-            foreach (OpCode op in pushInt) allPushes.Add(op);
-            foreach (OpCode op in pushBool) allPushes.Add(op);
-            allPushes.Add(PUSHA);
-            allPushes.Add(PUSHNULL);
-            foreach (OpCode op in pushData) allPushes.Add(op);
-            foreach (OpCode op in pushConst) allPushes.Add(op);
-            foreach (OpCode op in pushStackOps) allPushes.Add(op);
-            foreach (OpCode op in pushNewCompoundType) allPushes.Add(op);
-
-            foreach (OpCode op in tryThrowFinally) allEndsOfBasicBlock.Add(op);
-            foreach (OpCode op in unconditionalJump) allEndsOfBasicBlock.Add(op);
-            foreach (OpCode op in conditionalJump_L) allEndsOfBasicBlock.Add(op);
-            foreach (OpCode op in exceptions) allEndsOfBasicBlock.Add(op);
-            allEndsOfBasicBlock.Add(RET);
-        }
     }
 }

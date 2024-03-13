@@ -36,7 +36,7 @@ namespace Neo.Optimizer
                 var reader = new MemoryReader(File.ReadAllBytes(nefPath));
                 NefFile nef = reader.ReadSerializable<NefFile>();
                 ContractManifest manifest = ContractManifest.Parse(File.ReadAllBytes(manifestPath));
-                JToken debugInfo = JObject.Parse(Unzip(File.ReadAllBytes(debugInfoPath)))!;
+                JObject debugInfo = (JObject)JObject.Parse(Unzip(File.ReadAllBytes(debugInfoPath)))!;
 
                 //foreach ((int address, Instruction instruction) in addressAndInstructions)
                 //    Console.WriteLine(WriteInstruction(address, instruction, padding, methodTokens));
